@@ -16,6 +16,20 @@ A patient uses the web interface to select an appointment date and available tim
 
 The completed system was tested successfully: appointments could be booked, already-booked slots were protected against duplicate booking, and confirmation emails were delivered.
 
+## Booking Workflow Demonstration
+
+The screenshot below documents the completed end-to-end workflow during testing. It demonstrates three core application outcomes: a valid appointment is successfully booked, a second attempt to reserve the same doctor/date/time slot is rejected, and the patient receives an appointment confirmation email containing the booking details.
+
+![Booking workflow demonstration - successful booking, double-booking prevention, and email confirmation](IMG_3485.jpeg)
+
+### Demonstrated Results
+
+- **Successful booking:** a valid available appointment slot is accepted by the application.
+- **Double-booking prevention:** attempting to reserve the same slot again returns a message that the appointment time is no longer available.
+- **Email confirmation:** after a successful booking, Amazon SES delivers a confirmation containing the appointment ID, doctor, date, and time.
+
+The demonstration image is redacted to avoid exposing personal email information in the public repository.
+
 ## Key Features
 
 - Serverless architecture on AWS
@@ -230,6 +244,8 @@ End-to-end testing verified the core requirements:
 - A confirmation email was received after a successful booking.
 - The frontend was successfully deployed through Amazon S3 and CloudFront.
 
+The repository includes a redacted booking-workflow screenshot (`IMG_3485.jpeg`) showing the successful booking result, duplicate-slot rejection, and confirmation email produced during end-to-end testing.
+
 ## What I Learned
 
 This project provided practical experience with designing and troubleshooting a multi-service AWS serverless application. Key lessons included:
@@ -260,6 +276,7 @@ For a production medical system, additional controls would be required before st
 aws-serverless-medical-appointment-system/
 ├── README.md
 ├── IMG_3476.jpeg
+├── IMG_3485.jpeg
 ├── frontend/
 │   ├── index.html
 │   ├── style.css
