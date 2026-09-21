@@ -2,6 +2,12 @@
 
 A fully serverless medical appointment booking application built on AWS. The project demonstrates how a static web frontend can integrate with managed AWS services to retrieve appointment availability, create bookings safely, prevent double booking, and send confirmation emails.
 
+## Architecture
+
+The application uses a fully serverless AWS architecture. The frontend is delivered through Amazon CloudFront and Amazon S3, while API Gateway connects the frontend to AWS Lambda functions. DynamoDB stores appointment data, and Amazon SES sends booking confirmation emails.
+
+![AWS Serverless Medical Appointment System Architecture](IMG_3476.jpeg)
+
 ## Project Overview
 
 The goal of this project was to build an end-to-end appointment booking workflow without managing traditional servers.
