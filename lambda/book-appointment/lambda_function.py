@@ -1,11 +1,14 @@
 import json
 import boto3
 import uuid
+import os
 from botocore.exceptions import ClientError
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table("MedicalAppointment")
 ses = boto3.client("ses", region_name="eu-north-1")
+
+SES_FROM_EMAIL = os.environ.get("SES_FROM_EMAIL")
 
 
 def lambda_handler(event, context):
@@ -47,8 +50,11 @@ def lambda_handler(event, context):
             ConditionExpression="attribute_not_exists(SlotID)"
         )
 
+        if not SES_FROM_EMAIL:
+            raise ValueError("SES_FROM_EMAIL environment variable is not configured.")
+
         ses.send_email(
-            Source="ginikaaws@gmail.com",
+            Source=SES_FROM_EMAIL,
             Destination={
                 "ToAddresses": [patient_email]
             },
