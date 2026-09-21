@@ -16,7 +16,7 @@ The completed system was tested successfully: appointments could be booked, alre
 - Responsive static web frontend
 - Retrieval of available appointment slots
 - Appointment booking through API endpoints
-- Prevention of double booking
+- Prevention of double booking using DynamoDB conditional writes
 - Persistent appointment data
 - Email confirmation after successful booking
 - Static frontend hosting using Amazon S3
@@ -33,7 +33,7 @@ The completed system was tested successfully: appointments could be booked, alre
 | Amazon CloudFront | Securely delivers the frontend and provides HTTPS/CDN distribution |
 | Amazon API Gateway | Exposes backend HTTP API endpoints |
 | AWS Lambda | Executes appointment availability and booking logic |
-| Amazon DynamoDB | Stores appointment/booking data and supports booking validation |
+| Amazon DynamoDB | Stores appointment data and protects appointment slots from duplicate booking |
 | Amazon SES | Sends appointment confirmation emails |
 | AWS IAM | Controls permissions between services |
 | Amazon CloudWatch | Supports logging and troubleshooting of serverless functions |
@@ -41,43 +41,83 @@ The completed system was tested successfully: appointments could be booked, alre
 ## Architecture
 
 ```text
-Patient / Browser
-       |
-       v
-Amazon CloudFront
-       |
-       v
-Amazon S3 (HTML / CSS / JavaScript)
-       |
-       | API requests
-       v
-Amazon API Gateway
-       |
-       v
-AWS Lambda
-   |       |
-   |       +----> Amazon SES ----> Confirmation Email
-   |
-   +------------> Amazon DynamoDB
-                    |
-                    +---- Appointment availability
-                    +---- Booking records
-                    +---- Double-booking protection
+                         AWS Serverless Medical Appointment System
+
++------------------+
+| Patient / Browser|
++--------+---------+
+         |
+         | HTTPS
+         v
++------------------+
+| Amazon CloudFront|
+| CDN + HTTPS      |
++--------+---------+
+         |
+         v
++------------------+
+| Amazon S3        |
+| HTML / CSS / JS  |
++--------+---------+
+         |
+         | REST API requests
+         v
++------------------+
+| API Gateway      |
++--------+---------+
+         |
+         +-----------------------------+
+         |                             |
+         v                             v
++----------------------+      +----------------------+
+| Get Available Slots  |      | Book Appointment     |
+| Lambda               |      | Lambda               |
++----------+-----------+      +----------+-----------+
+           |                             |
+           | read bookings               | conditional write
+           v                             v
+       +-------------------------------------+
+       | Amazon DynamoDB                     |
+       | MedicalAppointment                  |
+       | SlotID = Doctor#Date#Time           |
+       +-------------------------------------+
+                                             |
+                                             | after successful booking
+                                             v
+                                  +----------------------+
+                                  | Amazon SES           |
+                                  | Confirmation Email   |
+                                  +----------------------+
 ```
+
+### Architecture Responsibilities
+
+**CloudFront + S3** form the presentation layer. S3 stores `index.html`, `style.css`, and `script.js`, while CloudFront provides the public HTTPS entry point and securely accesses the private S3 origin.
+
+**API Gateway** forms the API layer. The browser sends requests for appointment availability and appointment creation to API endpoints, which invoke the appropriate Lambda function.
+
+**AWS Lambda** forms the application layer. One function calculates available appointment slots and another processes bookings.
+
+**DynamoDB** forms the persistence layer. Appointment slots are represented using a `SlotID` composed from doctor, date, and time. The booking function uses a conditional database write so the same slot cannot be successfully created twice.
+
+**Amazon SES** provides the notification layer. After a booking succeeds, the application sends the patient an appointment confirmation email containing the appointment details.
 
 ## Application Flow
 
-1. The patient opens the application through the CloudFront-hosted frontend.
-2. The browser loads the HTML, CSS, and JavaScript assets stored in S3.
-3. The frontend requests available appointment slots through API Gateway.
-4. API Gateway invokes the appropriate Lambda function.
-5. Lambda reads the appointment data and returns available slots.
-6. The patient chooses a slot and submits their booking information.
-7. The booking Lambda validates that the requested slot is still available.
-8. The appointment is stored only when the booking conditions succeed.
-9. The booked slot is no longer available for another successful booking.
-10. Amazon SES sends an appointment confirmation email.
-11. The frontend displays the successful booking result to the patient.
+1. The patient opens the application through CloudFront.
+2. CloudFront retrieves the static frontend from the private S3 origin.
+3. The patient selects a date.
+4. JavaScript calls the available-slots API through API Gateway.
+5. API Gateway invokes the Get Available Slots Lambda function.
+6. Lambda checks DynamoDB and removes already-booked times from the clinic schedule.
+7. The available times are returned to the browser.
+8. The patient selects a time and submits their name and email address.
+9. API Gateway invokes the Book Appointment Lambda function.
+10. The Lambda function generates an appointment ID and attempts a DynamoDB conditional write.
+11. If the `SlotID` already exists, DynamoDB rejects the write and the API returns a conflict response, preventing double booking.
+12. If the write succeeds, the appointment is stored with `CONFIRMED` status.
+13. Amazon SES sends the appointment confirmation email.
+14. The API returns the successful booking result to the frontend.
 
 ## Frontend Deployment
 
@@ -99,15 +139,35 @@ The CloudFront distribution was configured with `index.html` as the default root
 
 One of the most important requirements was ensuring that two users could not successfully reserve the same appointment slot.
 
-The backend therefore does not rely only on what the browser displays as available. Availability is checked again when the booking request reaches the backend, and the database operation protects the appointment slot from being booked twice.
+Each appointment uses a slot identifier in the following form:
 
-This is important because frontend availability can become stale between the moment a patient views a slot and the moment they submit a booking.
+```text
+DoctorID#AppointmentDate#AppointmentTime
+```
 
-Testing confirmed that a successfully booked appointment could not subsequently be booked again as though it were still available.
+For example:
+
+```text
+DOCTOR001#2026-10-22#11:30
+```
+
+The booking Lambda writes the appointment with a DynamoDB condition requiring `SlotID` not to already exist. This makes the protection atomic at the database layer instead of relying on the frontend's displayed availability.
+
+If another request attempts to reserve the same slot, DynamoDB raises a conditional-check failure and the API returns HTTP `409`, indicating that the appointment is already booked.
+
+Testing confirmed that a successfully booked appointment could not subsequently be booked again.
+
+## Appointment Availability
+
+The Get Available Slots Lambda contains the clinic schedule and accepts a date and doctor ID through query parameters.
+
+It validates the date, rejects weekend appointments, checks the stored appointment SlotIDs for that doctor and date, and removes booked times before returning `availableSlots` to the frontend.
+
+The current implementation uses a DynamoDB `Scan` operation. This is suitable for the scale of this demonstration project, but a production version should use a DynamoDB data model and index that supports an efficient `Query` for doctor/date availability.
 
 ## Email Confirmation
 
-After a successful booking, the backend integrates with Amazon SES to send an email confirmation to the patient.
+After a successful booking, the backend integrates with Amazon SES to send an email confirmation to the patient. The confirmation contains the generated appointment ID, doctor, appointment date, and appointment time.
 
 During testing, the complete workflow succeeded from the web interface through the backend and database to the final confirmation email.
 
@@ -129,11 +189,11 @@ The application needed to return only valid available slots rather than simply a
 
 ### Preventing duplicate appointments
 
-A simple read-then-write workflow can create race conditions. Booking protection therefore needed to exist at the backend/database layer rather than depending on frontend state alone.
+A simple read-then-write workflow can create race conditions. Booking protection therefore needed to exist at the backend/database layer rather than depending on frontend state alone. DynamoDB conditional writes solved this requirement.
 
 ### Email delivery
 
-The booking workflow also had to integrate correctly with Amazon SES so that confirmation messages were sent only as part of a successful appointment flow.
+The booking workflow also had to integrate correctly with Amazon SES so that confirmation messages were sent as part of a successful appointment flow.
 
 ### Frontend deployment
 
@@ -143,10 +203,11 @@ The frontend was prepared as static HTML, CSS, and JavaScript files and uploaded
 
 End-to-end testing verified the core requirements:
 
-- The deployed frontend loaded successfully.
+- The deployed frontend loaded successfully through CloudFront.
 - Available appointment slots were retrieved.
+- Weekend appointment dates were rejected by the availability function.
 - A patient could submit a valid appointment.
-- Successful appointments were persisted.
+- Successful appointments were persisted in DynamoDB.
 - A previously booked slot could not be booked again successfully.
 - A confirmation email was received after a successful booking.
 - The frontend was successfully deployed through Amazon S3 and CloudFront.
@@ -158,13 +219,14 @@ This project provided practical experience with designing and troubleshooting a 
 - Designing serverless application flows
 - Integrating API Gateway with Lambda
 - Working with DynamoDB for application state
-- Protecting data integrity during concurrent requests
+- Using conditional writes to protect data integrity
 - Configuring IAM permissions between AWS services
 - Troubleshooting CORS between a browser frontend and an API
 - Integrating transactional email with Amazon SES
 - Hosting static applications in S3
 - Using CloudFront with a private S3 origin
 - Testing an application as a complete end-to-end system
+- Recognizing when a DynamoDB access pattern should evolve from `Scan` to `Query`
 
 ## Security Considerations
 
@@ -174,8 +236,6 @@ For a production medical system, additional controls would be required before st
 
 ## Repository Structure
 
-The repository will be expanded as the project source is documented:
-
 ```text
 aws-serverless-medical-appointment-system/
 ├── README.md
@@ -184,8 +244,10 @@ aws-serverless-medical-appointment-system/
 │   ├── style.css
 │   └── script.js
 ├── lambda/
-│   ├── get-available-slots/
-│   └── book-appointment/
+│   ├── book-appointment/
+│   │   └── lambda_function.py
+│   └── get-available-slots/
+│       └── lambda_function.py
 ├── docs/
 │   └── architecture/
 └── screenshots/
@@ -194,6 +256,8 @@ aws-serverless-medical-appointment-system/
 ## Future Improvements
 
 Potential next steps include adding authentication, an administrative appointment dashboard, automated infrastructure deployment with AWS SAM/Terraform/CloudFormation, CI/CD with GitHub Actions, automated tests, monitoring/alarms, a custom domain, and stronger production-grade security controls.
+
+A production-scale DynamoDB design would also replace the availability scan with a query-oriented access pattern and appropriate keys/indexes.
 
 ## Project Status
 
