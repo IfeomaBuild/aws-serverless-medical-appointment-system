@@ -44,7 +44,7 @@ The completed system was tested successfully: appointments could be booked, alre
 | AWS IAM | Controls permissions between services |
 | Amazon CloudWatch | Supports logging and troubleshooting of serverless functions |
 
-## Architecture
+## Detailed Architecture
 
 ```text
                          AWS Serverless Medical Appointment System
@@ -175,7 +175,19 @@ The current implementation uses a DynamoDB `Scan` operation. This is suitable fo
 
 After a successful booking, the backend integrates with Amazon SES to send an email confirmation to the patient. The confirmation contains the generated appointment ID, doctor, appointment date, and appointment time.
 
+The sender address is configured through the `SES_FROM_EMAIL` Lambda environment variable rather than being stored directly in the source code. The value should be an email identity that is appropriately configured in Amazon SES for the deployment environment.
+
 During testing, the complete workflow succeeded from the web interface through the backend and database to the final confirmation email.
+
+## Configuration
+
+The source code intentionally keeps deployment-specific sender information outside the repository.
+
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `SES_FROM_EMAIL` | Book Appointment Lambda | Sender address used by Amazon SES for appointment confirmation emails |
+
+The frontend API Gateway base URL is currently configured in `frontend/script.js`. This URL is required by the browser and is not treated as a secret. For multi-environment deployments, it could be injected through a build/deployment configuration instead.
 
 ## Challenges Encountered
 
@@ -238,6 +250,8 @@ This project provided practical experience with designing and troubleshooting a 
 
 The project keeps infrastructure exposure limited where possible. The S3 frontend origin is accessed through CloudFront instead of requiring the bucket to be generally public. IAM permissions should follow least-privilege principles, and AWS credentials or secrets must never be committed to this repository.
 
+Deployment-specific values such as the SES sender address are kept outside the Lambda source code and supplied through environment configuration.
+
 For a production medical system, additional controls would be required before storing or processing real patient health information, including appropriate authentication, authorization, encryption, auditing, data-retention policies, regulatory/compliance review, and operational monitoring.
 
 ## Repository Structure
@@ -245,18 +259,16 @@ For a production medical system, additional controls would be required before st
 ```text
 aws-serverless-medical-appointment-system/
 ├── README.md
+├── IMG_3476.jpeg
 ├── frontend/
 │   ├── index.html
 │   ├── style.css
 │   └── script.js
-├── lambda/
-│   ├── book-appointment/
-│   │   └── lambda_function.py
-│   └── get-available-slots/
-│       └── lambda_function.py
-├── docs/
-│   └── architecture/
-└── screenshots/
+└── lambda/
+    ├── book-appointment/
+    │   └── lambda_function.py
+    └── get-available-slots/
+        └── lambda_function.py
 ```
 
 ## Future Improvements
